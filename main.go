@@ -3,7 +3,9 @@ package main
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"log"
+	"time"
 
 	"github.com/duckdb/duckdb-go/v2"
 	"github.com/paulmach/orb/encoding/wkb"
@@ -13,6 +15,8 @@ import (
 func main() {
 	MIN_ZOOM := 10
 	MAX_ZOOM := 22
+
+	t1 := time.Now()
 
 	reader, err := sql.Open("duckdb", "db/spatial.db")
 	if err != nil {
@@ -98,5 +102,8 @@ func main() {
 		}
 	}
 
+	t2 := time.Now()
 	log.Println("[x] processed:", count)
+
+	fmt.Println("[x] total time:", t2.Unix()-t1.Unix())
 }
