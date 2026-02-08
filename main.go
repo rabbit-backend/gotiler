@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"fmt"
 	"log"
-	"sync"
 	"time"
 
 	"github.com/duckdb/duckdb-go/v2"
@@ -17,9 +16,6 @@ import (
 func main() {
 	MIN_ZOOM := 10
 	MAX_ZOOM := 22
-
-	var lock sync.RWMutex
-	var wg sync.WaitGroup
 
 	t1 := time.Now()
 
@@ -89,33 +85,25 @@ func main() {
 		s := wkb.Scanner(nil)
 
 		rows.Scan(&id, &s)
+
 		for zoom := MIN_ZOOM; zoom <= MAX_ZOOM; zoom++ {
-			wg.Add(1)
+			tiles, err := tilecover.Geometry(s.Geometry, maptile.Zoom(zoom))
+			if err != nil {
+				return
+			}
 
-			go func(wg *sync.WaitGroup) {
-				tiles, err := tilecover.Geometry(s.Geometry, maptile.Zoom(zoom))
-				if err != nil {
-					wg.Done()
-					return
-				}
+			for range tiles {
+				count += 1
+			}
+		}
 
-				for range tiles {
-					lock.Lock()
-					count += 1
-					lock.Unlock()
-				}
-
-				wg.Done()
-			}(&wg)
-
+		if count%100_000 == 0 {
+			log.Println("[x] processed:", count)
 		}
 	}
 
-	wg.Wait()
-
-	log.Println("[x] total records:", count)
 	t2 := time.Now()
-	log.Println("[x] processed:", count)
 
+	log.Println("[x] processed:", count)
 	fmt.Println("[x] total time:", t2.Unix()-t1.Unix())
 }
