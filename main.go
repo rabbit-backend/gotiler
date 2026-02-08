@@ -5,16 +5,21 @@ import (
 	"database/sql"
 	"fmt"
 	"log"
+	"sync"
 	"time"
 
 	"github.com/duckdb/duckdb-go/v2"
 	"github.com/paulmach/orb/encoding/wkb"
 	"github.com/paulmach/orb/maptile"
+	"github.com/paulmach/orb/maptile/tilecover"
 )
 
 func main() {
 	MIN_ZOOM := 10
 	MAX_ZOOM := 22
+
+	var lock sync.RWMutex
+	var wg sync.WaitGroup
 
 	t1 := time.Now()
 
@@ -84,24 +89,31 @@ func main() {
 		s := wkb.Scanner(nil)
 
 		rows.Scan(&id, &s)
-		bounds := s.Geometry.Bound()
-
 		for zoom := MIN_ZOOM; zoom <= MAX_ZOOM; zoom++ {
-			tmin := maptile.At(bounds.Min, maptile.Zoom(zoom))
-			tmax := maptile.At(bounds.Max, maptile.Zoom(zoom))
+			wg.Add(1)
 
-			for x := tmin.X; x <= tmax.X; x += 1 {
-				for y := tmin.Y; y <= tmax.Y; y += 1 {
-					count += 1
+			go func(wg *sync.WaitGroup) {
+				tiles, err := tilecover.Geometry(s.Geometry, maptile.Zoom(zoom))
+				if err != nil {
+					wg.Done()
+					return
 				}
-			}
-		}
 
-		if count%100_000 == 0 {
-			log.Println("[x] processed:", count)
+				for range tiles {
+					lock.Lock()
+					count += 1
+					lock.Unlock()
+				}
+
+				wg.Done()
+			}(&wg)
+
 		}
 	}
 
+	wg.Wait()
+
+	log.Println("[x] total records:", count)
 	t2 := time.Now()
 	log.Println("[x] processed:", count)
 
