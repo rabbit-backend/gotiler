@@ -1,10 +1,12 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"fmt"
 	"log"
+	"sync"
 	"time"
 
 	"github.com/duckdb/duckdb-go/v2"
@@ -14,8 +16,10 @@ import (
 )
 
 func main() {
-	MIN_ZOOM := 10
-	MAX_ZOOM := 22
+	MIN_ZOOM := 18
+	MAX_ZOOM := 18
+
+	var wg sync.WaitGroup
 
 	t1 := time.Now()
 
@@ -43,10 +47,12 @@ func main() {
 
 	if _, err := writer.Exec(`
 		CREATE TABLE IF NOT EXISTS temp (
+			id INTEGER,
 			z INTEGER,
 			x INTEGER,
 			y INTEGER,
-			features BLOB
+			data BLOB,
+			features GEOMETRY
 		);
 
 		DELETE FROM temp;
@@ -70,8 +76,6 @@ func main() {
 	defer conn.Close()
 
 	appender, err := duckdb.NewAppenderFromConn(conn, "", "temp")
-	log.Println(appender)
-
 	log.Println("[x] started generating the vector tiles...")
 
 	rows, err := reader.QueryContext(context.Background(), `SELECT id, ST_AsWKB(geom) FROM polygons`)
@@ -85,25 +89,43 @@ func main() {
 		s := wkb.Scanner(nil)
 
 		rows.Scan(&id, &s)
+		geom := s.Geometry
+
+		buf := new(bytes.Buffer)
+		wkb.NewEncoder(buf).Encode(geom)
 
 		for zoom := MIN_ZOOM; zoom <= MAX_ZOOM; zoom++ {
-			tiles, err := tilecover.Geometry(s.Geometry, maptile.Zoom(zoom))
-			if err != nil {
-				return
-			}
+			wg.Add(1)
 
-			for range tiles {
-				count += 1
-			}
+			go func(wg *sync.WaitGroup) {
+				tiles, err := tilecover.Geometry(geom, maptile.Zoom(zoom))
+				if err != nil {
+					log.Println(err)
+					return
+				}
+
+				for tile := range tiles {
+					appender.AppendRow(count, tile.Z, tile.X, tile.Y, buf.Bytes(), nil)
+					count += 1
+				}
+
+				wg.Done()
+			}(&wg)
 		}
+
+		wg.Wait()
 
 		if count%100_000 == 0 {
 			log.Println("[x] processed:", count)
 		}
 	}
 
-	t2 := time.Now()
+	appender.Flush()
 
+	writer.Exec(`UPDATE temp SET features = ST_GeomFromWKB(data);`)
+	writer.Exec(`ALTER TABLE temp DROP COLUMN data;`)
+
+	t2 := time.Now()
 	log.Println("[x] processed:", count)
 	fmt.Println("[x] total time:", t2.Unix()-t1.Unix())
 }
