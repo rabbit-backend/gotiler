@@ -40,7 +40,7 @@ func main() {
 			tolerance = 1
 		}
 
-		if i >= 14 {
+		if i >= 10 {
 			tolerance = 0
 		}
 
@@ -90,7 +90,7 @@ func main() {
 
 			blob, _ := mvt.Marshal(layers)
 			appender.AppendRow(
-				z, x, y, blob,
+				z, x, (1 << z) - 1 - y, blob,
 			)
 		}
 	}

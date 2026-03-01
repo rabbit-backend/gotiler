@@ -30,7 +30,7 @@ const TOTAL_FEATURES = `SELECT COUNT(*) FROM features`
 const GENERATE_MVT_GEOM = `
 WITH temp_tiles AS (
 	SELECT 
-		ST_Simplify(
+		ST_SimplifyPreserveTopology(
 			geom, ?
 		) geom,
 		t.Z, t.X, t.Y
