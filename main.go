@@ -15,7 +15,7 @@ import (
 
 func main() {
 	minZoom := 0
-	maxZoom := 20
+	maxZoom := 14
 
 	conn := db.OpenDB()
 	appender := db.OpenMBTilesAppender()
@@ -25,7 +25,7 @@ func main() {
 
 	log.Println("Total Features:", totalFeatures)
 
-	for i := minZoom; i < maxZoom; i++ {
+	for i := minZoom; i <= maxZoom; i++ {
 		log.Println("Generating Tiles for Zoom", i)
 		if _, err := conn.ExecContext(
 			context.Background(), 
@@ -35,12 +35,8 @@ func main() {
 			log.Fatalln(err)
 		}
 
-		tolerance :=  float64(uint32(1) << i) / float64(totalFeatures)
-		if tolerance > 1 {
-			tolerance = 1
-		}
-
-		if i >= 10 {
+		tolerance :=  1 / (float64(uint32(1) << i))
+		if i >= 14 {
 			tolerance = 0
 		}
 

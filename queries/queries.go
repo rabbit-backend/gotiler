@@ -5,7 +5,7 @@ const INITIALIZE_DB = `
 LOAD spatial;
 
 -- optionally load the data from the parquet file into the database
--- CREATE TABLE features AS (SELECT * FROM read_parquet('./path-to-parquet'));
+-- CREATE TABLE features AS (SELECT * FROM st_read('./tmp/data.geojsonl'));
 
 CREATE TABLE IF NOT EXISTS tile_covers (
 	id 		BIGINT,
@@ -30,7 +30,7 @@ const TOTAL_FEATURES = `SELECT COUNT(*) FROM features`
 const GENERATE_MVT_GEOM = `
 WITH temp_tiles AS (
 	SELECT 
-		ST_SimplifyPreserveTopology(
+		ST_Simplify(
 			geom, ?
 		) geom,
 		t.Z, t.X, t.Y
