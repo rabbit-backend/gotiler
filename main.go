@@ -1,95 +1,62 @@
 package main
 
 import (
-	"bytes"
+	"bufio"
 	"context"
+	"fmt"
 	"log"
+	"os/exec"
 
-	"github.com/paulmach/orb/encoding/mvt"
-	"github.com/paulmach/orb/encoding/wkb"
-	"github.com/paulmach/orb/geojson"
-	"github.com/paulmach/orb/maptile"
 	"github.com/rabbit-backend/gotiler/db"
-	"github.com/rabbit-backend/gotiler/queries"
 )
 
 func main() {
-	minZoom := 0
-	maxZoom := 14
+	DB := db.ConnectPG()
 
-	conn := db.OpenDB()
-	appender := db.OpenMBTilesAppender()
+	cmd := exec.Command(
+		"tippecanoe", 
+		"-zg", 
+		"-o", "tmp/data.pmtiles", 
+		"--drop-densest-as-needed", 
+		"-l", "data",
+	)
 
-	var totalFeatures int
-	conn.QueryRowContext(context.TODO(), queries.TOTAL_FEATURES).Scan(&totalFeatures)
+	stdin, _ := cmd.StdinPipe()
+	stdout, _ := cmd.StdoutPipe()
+	stderr, _ := cmd.StderrPipe()
 
-	log.Println("Total Features:", totalFeatures)
+	cmd.Start()
 
-	for i := minZoom; i <= maxZoom; i++ {
-		log.Println("Generating Tiles for Zoom", i)
-		if _, err := conn.ExecContext(
-			context.Background(), 
-			queries.GENERATE_TILE_COVERS_FOR_ZOOM, 
-			i,
-		); err != nil {
-			log.Fatalln(err)
+	go func () {
+		scanner := bufio.NewScanner(stdout)
+		scanner.Split(bufio.ScanBytes)
+
+		for scanner.Scan() {
+			fmt.Print(string(scanner.Bytes()))
 		}
+	} ()
 
-		tolerance :=  1 / (float64(uint32(1) << i))
-		if i >= 14 {
-			tolerance = 0
+	go func () {
+		scanner := bufio.NewScanner(stderr)
+		scanner.Split(bufio.ScanBytes)
+
+		for scanner.Scan() {
+			fmt.Print(string(scanner.Bytes()))
 		}
+	} ()
 
-		rows, err := conn.QueryContext(
-			context.Background(), 
-			queries.GENERATE_MVT_GEOM, 
-			tolerance, 
-			i,
-		)
-		if err != nil {
-			log.Fatalln(err)
-		}
-
-		featuresMap := make(map[uint64](*geojson.FeatureCollection))
-
-		for rows.Next() {
-			var z, x, y uint64
-			var geomWKB []byte
-
-			rows.Scan(&z, &x, &y, &geomWKB)
-			geom ,err := wkb.NewDecoder(bytes.NewBuffer(geomWKB)).Decode()
-			if err != nil {
-				log.Fatalln(err)
-			}
-
-			tileID := db.ZxyToID(uint8(z), uint32(x), uint32(y))
-			
-			_, ok := featuresMap[tileID]
-			if !ok {
-				featuresMap[tileID] = geojson.NewFeatureCollection()
-				featuresMap[tileID].Append(geojson.NewFeature(geom))
- 			} else {
-				featuresMap[tileID].Append(geojson.NewFeature(geom))
-			}
-		}
-
-		for tileID := range featuresMap {
-			z, x, y := db.IDToZxy(tileID)
-			tile := maptile.New(x, y, maptile.Zoom(z))
-			
-			layers := mvt.NewLayers(map[string]*geojson.FeatureCollection{
-				"data": featuresMap[tileID],
-			})
-
-			layers.ProjectToTile(tile)
-			layers.Clip(mvt.MapboxGLDefaultExtentBound)
-
-			blob, _ := mvt.Marshal(layers)
-			appender.AppendRow(
-				z, x, (1 << z) - 1 - y, blob,
-			)
-		}
+	rows, err := DB.QueryContext(context.Background(), db.QUERY)
+	if err != nil {
+		log.Fatalln(err)
 	}
 
-	appender.Flush()
+	for rows.Next() {
+		var data string
+
+		rows.Scan(&data)
+		stdin.Write([]byte(data))
+	}
+
+	stdin.Close()
+	cmd.Wait()
 }
